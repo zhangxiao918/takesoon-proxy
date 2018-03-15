@@ -51,7 +51,7 @@ public abstract class AbstractProxyPool {
      * @param proxyServers 代理服务器地址
      */
     protected void init(String proxyServers) {
-        init(proxyServers,null);
+        init(proxyServers, null);
     }
 
     /**
@@ -59,7 +59,7 @@ public abstract class AbstractProxyPool {
      *
      * @param proxyServers 代理服务器地址
      */
-    protected void init(String proxyServers,RedisCacheService cacheService) {
+    protected void init(String proxyServers, RedisCacheService cacheService) {
         if (StringUtils.isNotBlank(proxyServers)) {
             String[] servers = proxyServers.split(",");
             if (null != servers && servers.length > 0) {
@@ -76,10 +76,10 @@ public abstract class AbstractProxyPool {
                         InetSocketAddress inetSocketAddress = new InetSocketAddress(tmpSplit[0], Integer.valueOf(tmpSplit[1]));
                         Proxy proxy = new Proxy(Proxy.Type.HTTP, inetSocketAddress);
                         OkHttpClient.Builder tmpBuilder = builder.proxy(proxy);
-                        if(null != cacheService) {
+                        if (null != cacheService) {
                             // 走缓存逻辑
-                            tmpBuilder.cookieJar(new CookieImpl(tmpSplit[0],proxy,cacheService));
-                        }else{
+                            tmpBuilder.cookieJar(new CookieImpl(tmpSplit[0], proxy, cacheService));
+                        } else {
                             // 走内存逻辑
                             tmpBuilder.cookieJar(new CookieMemoryImpl(tmpSplit[0]));
                         }
@@ -88,12 +88,11 @@ public abstract class AbstractProxyPool {
                 }
                 logger.debug("ProxyPool.init.size:{}", okHttpClientSize());
             }
+        }
+        if (null != cacheService) {
+            buildDefaultOkHttpClient(cacheService);
         } else {
-            if(null != cacheService) {
-                buildDefaultOkHttpClient(cacheService);
-            }else{
-                buildDefaultOkHttpClient();
-            }
+            buildDefaultOkHttpClient();
         }
         initInvokieTime();
     }
@@ -120,7 +119,8 @@ public abstract class AbstractProxyPool {
 
     /**
      * 构建默认的客户端
-     * @param cacheService  缓存对象
+     *
+     * @param cacheService 缓存对象
      */
     private void buildDefaultOkHttpClient(RedisCacheService cacheService) {
         OkHttpClient.Builder builder = new OkHttpClient.Builder();
@@ -130,9 +130,9 @@ public abstract class AbstractProxyPool {
         TrustAllManager trustAllManager = new TrustAllManager();
         builder.sslSocketFactory(createSSLSocketFactory(), trustAllManager);
         builder.hostnameVerifier(new TrustAllHostnameVerifier());
-        if(null != cacheService) {
-            builder.cookieJar(new CookieImpl("0.0.0.0",null,cacheService));
-        }else{
+        if (null != cacheService) {
+            builder.cookieJar(new CookieImpl("0.0.0.0", null, cacheService));
+        } else {
             builder.cookieJar(new CookieMemoryImpl("0.0.0.0"));
         }
         defaultOkHttp = builder.build();
@@ -261,7 +261,7 @@ public abstract class AbstractProxyPool {
         if (invokeTimes.get() % 100 == 0) {
             logger.info("invokeTimes:{},mode:{}", invokeTimes.get(), mode);
         }
-        return 0;
+        return mode;
     }
 
 }

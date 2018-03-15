@@ -13,6 +13,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 public class ProxyPoolTest extends TestBase {
 
@@ -165,7 +167,7 @@ public class ProxyPoolTest extends TestBase {
                             bbsUrl = href;
                             continue;
                         }
-                        System.out.println(String.format(strFormat,title,href));
+                        System.out.println(String.format(strFormat, title, href));
                         try {
                             Thread.sleep(750);
                         } catch (InterruptedException e) {
@@ -178,6 +180,83 @@ public class ProxyPoolTest extends TestBase {
             }
             j++;
         } while (j < 5);
+    }
+
+    @Test
+    public void autoHomeBbsIndexV2() throws IOException {
+        Assert.assertNotNull(proxyPool);
+        OkHttpClient okHttpClient = proxyPool.getDefaultOkHttp();
+        Assert.assertNotNull(okHttpClient);
+        String body = null;
+        ConcurrentHashMap<String, String> urlCount = new ConcurrentHashMap<>();
+        try {
+            body = get(okHttpClient, "https://www.autohome.com.cn/", "https://www.autohome.com.cn", 0);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        if (StringUtils.isBlank(body)) {
+            System.err.println("未抓取到内容");
+            return;
+        }
+        Document document = Jsoup.parse(body);
+        String title = document.title();
+        if (StringUtils.equals(title, "用户访问安全认证")) {
+            System.err.println("0\t需要验证" + okHttpClient.proxy().toString());
+            System.out.println(body);
+            try {
+                Thread.sleep(60 * 1000L);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+
+        String bbsUrl = "https://club.autohome.com.cn/bbs/forum-c-3788-%s.html";
+        String referer = "";
+        int j = 1;
+        int i = 0;
+        int maxPage = 10;
+        do {
+            if (StringUtils.isBlank(referer)) {
+                referer = "https://www.autohome.com.cn/beijing/";
+            }
+            String url = String.format(bbsUrl, String.valueOf(j));
+            body = get(okHttpClient, url, referer, 0);
+            referer = url;
+            Assert.assertNotNull(body);
+            document = Jsoup.parse(body);
+            title = document.title();
+            if (StringUtils.equals(title, "用户访问安全认证")) {
+                System.err.println("1\t需要验证" + okHttpClient.proxy().toString());
+                try {
+                    Thread.sleep(60 * 1000L);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+            Elements elements = document.select("div#subcontent > dl.list_dl > dt > a");
+            Assert.assertNotNull(elements);
+            for (Element element : elements) {
+                String href = element.attr("href");
+                if (!StringUtils.startsWith(href, "https://")
+                        || !StringUtils.startsWith(href, "http://")) {
+                    href = AUTO_HOME_CLUB_URL_PREFIX + href;
+                }
+                if (!urlCount.containsKey(href)) {
+                    urlCount.put(href, href);
+                }
+                String hrefTitle = element.text();
+                String strFormat = "%s\t%s";
+                System.out.println("i=" + i + "\t" + String.format(strFormat, hrefTitle, href));
+                i++;
+            }
+            j++;
+            try {
+                blockingQueue.poll(5, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        } while (j < maxPage);
+        System.err.println("去重后的链接数量:" + urlCount.size());
     }
 
     @Test
