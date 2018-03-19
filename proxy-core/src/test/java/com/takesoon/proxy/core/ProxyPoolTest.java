@@ -2,6 +2,7 @@ package com.takesoon.proxy.core;
 
 import com.takesoon.proxy.core.impl.ProxyPool;
 import okhttp3.OkHttpClient;
+import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -211,6 +212,7 @@ public class ProxyPoolTest extends TestBase {
         }
 
         String bbsUrl = "https://club.autohome.com.cn/bbs/forum-c-3788-%s.html";
+        bbsUrl = "https://club.autohome.com.cn/bbs/forum-c-2123-%s.html";
         String referer = "";
         int j = 1;
         int i = 0;
@@ -233,10 +235,19 @@ public class ProxyPoolTest extends TestBase {
                     e.printStackTrace();
                 }
             }
-            Elements elements = document.select("div#subcontent > dl.list_dl > dt > a");
+            Elements elements = document.select("div#subcontent > dl.list_dl[lang]");
             Assert.assertNotNull(elements);
             for (Element element : elements) {
-                String href = element.attr("href");
+                String values = element.attr("lang");
+                String author = "autohome_author";
+                if (StringUtils.isNotBlank(values)) {
+                    String[] splits = values.split("\\|");
+                    if (ArrayUtils.isNotEmpty(splits) && splits.length >= 11) {
+                        author = splits[10];
+                    }
+                }
+                Element element1 = element.select("dt > a").first();
+                String href = element1.attr("href");
                 if (!StringUtils.startsWith(href, "https://")
                         || !StringUtils.startsWith(href, "http://")) {
                     href = AUTO_HOME_CLUB_URL_PREFIX + href;
@@ -244,9 +255,9 @@ public class ProxyPoolTest extends TestBase {
                 if (!urlCount.containsKey(href)) {
                     urlCount.put(href, href);
                 }
-                String hrefTitle = element.text();
-                String strFormat = "%s\t%s";
-                System.out.println("i=" + i + "\t" + String.format(strFormat, hrefTitle, href));
+                String hrefTitle = element1.text();
+                String strFormat = "%s\t%s\t%s";
+                System.out.println("i=" + i + "\t" + String.format(strFormat, author, hrefTitle, href));
                 i++;
             }
             j++;
