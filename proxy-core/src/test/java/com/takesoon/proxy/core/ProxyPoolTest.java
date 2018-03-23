@@ -2,6 +2,7 @@ package com.takesoon.proxy.core;
 
 import com.takesoon.proxy.core.impl.ProxyPool;
 import okhttp3.OkHttpClient;
+import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.jsoup.Jsoup;
@@ -159,7 +160,9 @@ public class ProxyPoolTest extends TestBase {
                         document = Jsoup.parse(body);
                         title = document.title();
                         if (StringUtils.equals(title, "用户访问安全认证")) {
-                            System.err.println("j=" + j + ",i=" + i + " 需要验证" + okHttpClient.proxy().toString());
+                            if (null != okHttpClient.proxy()) {
+                                System.err.println("j=" + j + ",i=" + i + " 需要验证" + okHttpClient.proxy().toString());
+                            }
                             try {
                                 Thread.sleep(60 * 1000L);
                             } catch (InterruptedException e) {
@@ -180,7 +183,7 @@ public class ProxyPoolTest extends TestBase {
                 i++;
             }
             j++;
-        } while (j < 5);
+        } while (j < 3);
     }
 
     @Test
@@ -256,8 +259,8 @@ public class ProxyPoolTest extends TestBase {
                     urlCount.put(href, href);
                 }
                 String hrefTitle = element1.text();
-                String strFormat = "%s\t%s\t%s";
-                System.out.println("i=" + i + "\t" + String.format(strFormat, author, hrefTitle, href));
+                String strFormat = "%s\t%s\t%s\t%s";
+                System.out.println("i=" + i + "\t" + String.format(strFormat, author, hrefTitle, href, values));
                 i++;
             }
             j++;
@@ -266,6 +269,7 @@ public class ProxyPoolTest extends TestBase {
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
+            break;
         } while (j < maxPage);
         System.err.println("去重后的链接数量:" + urlCount.size());
     }
@@ -297,5 +301,133 @@ public class ProxyPoolTest extends TestBase {
             }
         }
 
+    }
+
+    @Test
+    public void com163() {
+        String news163Url = "http://www.163.com/";
+        OkHttpClient okHttpClient = proxyPool.getDefaultOkHttp();
+        try {
+            String body = get(okHttpClient, news163Url, null, 0);
+            if (StringUtils.isNotBlank(body)) {
+                Document document = Jsoup.parse(body);
+                Elements elements = document.select("ul > li[class^=liw] > a");
+                if (null != elements && CollectionUtils.isNotEmpty(elements)) {
+                    for (Element element : elements) {
+                        String href = element.attr("href");
+                        list163(href, StringUtils.equals(href, news163Url) ? null : news163Url);
+                        try {
+                            blockingQueue.poll(5, TimeUnit.SECONDS);
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+
+    public void list163(String href, String referer) {
+        OkHttpClient okHttpClient = proxyPool.getDefaultOkHttp();
+        try {
+            String body = get(okHttpClient, href, referer, 0);
+            if (StringUtils.isNotBlank(body)) {
+                Document document = Jsoup.parse(body);
+                Elements elements = document.select("a[href^=" + href + "]");
+                if (null != elements && CollectionUtils.isNotEmpty(elements)) {
+                    for (Element element : elements) {
+                        String subHref = element.attr("href");
+                        System.out.println(subHref);
+                        get(okHttpClient, subHref, StringUtils.equals(subHref, href) ? null : href, 0);
+                        try {
+                            blockingQueue.poll(250, TimeUnit.MILLISECONDS);
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    @Test
+    public void autohomeHomeVisit() {
+        String news163Url = "https://www.autohome.com.cn/hangzhou/";
+        OkHttpClient okHttpClient = proxyPool.getDefaultOkHttp();
+        try {
+            String body = get(okHttpClient, news163Url, null, 0);
+            if (StringUtils.isNotBlank(body)) {
+                Document document = Jsoup.parse(body);
+                Elements elements = document.select("a[class^=navlink-item]");
+                if (null != elements && CollectionUtils.isNotEmpty(elements)) {
+                    for (Element element : elements) {
+                        String href = element.attr("href");
+                        if (href.contains("javascript")
+                                || href.contains("void")
+                                || !href.contains("autohome.com.cn/")) {
+                            continue;
+                        }
+                        if (!StringUtils.startsWith(href, "http:")
+                                || !StringUtils.startsWith(href, "https:")) {
+                            href = "https:" + href;
+                        }
+                        try {
+                            autohomeList(href, StringUtils.equals(href, news163Url) ? null : news163Url);
+                            blockingQueue.poll(5, TimeUnit.SECONDS);
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void autohomeList(String href, String referer) {
+        OkHttpClient okHttpClient = proxyPool.getDefaultOkHttp();
+        try {
+            String body = get(okHttpClient, href, referer, 0);
+            if (StringUtils.isNotBlank(body)) {
+                Document document = Jsoup.parse(body);
+                Elements elements = document.select("a[href]");
+                if (null != elements && CollectionUtils.isNotEmpty(elements)) {
+                    for (Element element : elements) {
+                        String subHref = element.attr("href");
+                        if (subHref.contains("javascript")
+                                || subHref.contains("void")
+                                || !subHref.contains("autohome.com.cn/")) {
+                            continue;
+                        }
+                        if (!StringUtils.startsWith(subHref, "http")
+                                || !StringUtils.startsWith(subHref, "https")) {
+                            subHref = "https:" + element.attr("href");
+                        }
+                        System.out.println(subHref);
+
+                        String content = get(okHttpClient, subHref, StringUtils.equals(subHref, href) ? null : href, 0);
+                        if (StringUtils.isNotBlank(content)) {
+                            Document document1 = Jsoup.parse(content);
+                            if (StringUtils.equals(document1.title(), "用户访问安全认证")) {
+                                System.err.println("1\t需要验证" + href);
+                            }
+                        }
+                        try {
+                            blockingQueue.poll(250, TimeUnit.MILLISECONDS);
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 }

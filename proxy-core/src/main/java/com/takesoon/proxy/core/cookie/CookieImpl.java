@@ -5,20 +5,19 @@ import com.ouer.cache.redis.RedisCacheService;
 import okhttp3.Cookie;
 import okhttp3.CookieJar;
 import okhttp3.HttpUrl;
+import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.MapUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.Proxy;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 基于缓存的cookie实现类
+ *
  * @author bluestome
  */
 public class CookieImpl implements CookieJar {
@@ -27,6 +26,7 @@ public class CookieImpl implements CookieJar {
     private Proxy proxy;
     private String tag;
     public static final String CACHE_KEY = "%s:%s";
+    public static final String CACHE_SPEC_KEY = "%s_%s";
 
     private volatile ConcurrentHashMap<String, ConcurrentHashMap<String, String>> memoryCookies = new ConcurrentHashMap<>();
 
@@ -41,110 +41,53 @@ public class CookieImpl implements CookieJar {
 
     @Override
     public synchronized void saveFromResponse(HttpUrl httpUrl, List<Cookie> cookies) {
+        logger.debug("set-cookie", JSON.toJSONString(cookies));
         String key = key(String.valueOf(hashCode()), httpUrl.host());
         if (StringUtils.isNotBlank(tag)) {
             key = key(tag, httpUrl.host());
         }
-
-        if (null != httpUrl && StringUtils.isNotBlank(httpUrl.host()) && StringUtils.isNotBlank(key)) {
-            Map<String, String> cookieMap = new HashMap<>();
-            //Redis中获取已部分已存的缓存
-            if (StringUtils.isNotBlank(key)) {
-                String cacheJson = cacheService.get(key, String.class, null);
-                if (StringUtils.isNotBlank(cacheJson)) {
-                    Map<String, String> cacheCookieMap = JSON.parseObject(cacheJson, Map.class);
-                    if (MapUtils.isNotEmpty(cacheCookieMap)) {
-                        cookieMap.putAll(cacheCookieMap);
-                    }
-                }
-            }
-
-            //实际传入需要被缓存的Cookie的列表处理
-            for (Cookie cookie : cookies) {
-                if (StringUtils.isNotBlank(cookie.name()) && null != cookie) {
-                    if (cookie.expiresAt() > now()) {
-                        cookieMap.put(cookie.name(), cookie.toString());
-                    }
-                }
-            }
-
-            //对需要缓存的对象进行加工处理
-            if (MapUtils.isNotEmpty(cookieMap)) {
-                ConcurrentHashMap<String, String> hostCookieCache = memoryCookies.get(httpUrl.host());
-                if (MapUtils.isEmpty(hostCookieCache)) {
-                    hostCookieCache = new ConcurrentHashMap<>();
-                }
-                hostCookieCache.putAll(cookieMap);
-                if (MapUtils.isNotEmpty(hostCookieCache)) {
-                    memoryCookies.put(httpUrl.host(), hostCookieCache);
-                }
-
-                String json = JSON.toJSONString(cookieMap);
-                if (StringUtils.isNotBlank(json)) {
-                    cacheService.put(key, json);
+        for (Cookie cookie : cookies) {
+            if (StringUtils.isNotBlank(cookie.name()) && null != cookie) {
+                if (cookie.expiresAt() > now()) {
+                    cacheService.sadd(key, cookie.domain());
+                    cacheService.sadd(cookie.domain(), cookie.name());
+                    String dck = String.format(CACHE_SPEC_KEY, cookie.domain(), cookie.name());
+                    cacheService.put(dck, cookie.toString());
+                    cacheService.expireAfter(dck, (int) (cookie.expiresAt() - System.currentTimeMillis()));
                 }
             }
         }
+
     }
 
     @Override
     public List<Cookie> loadForRequest(HttpUrl httpUrl) {
         List<Cookie> list = new ArrayList<Cookie>();
-        ConcurrentHashMap<String, String> hostCookieCache = memoryCookies.get(httpUrl.host());
-        if (MapUtils.isNotEmpty(hostCookieCache)) {
-            //本地缓存存在
-            if (MapUtils.isNotEmpty(hostCookieCache)) {
-                for (String cookieStr : hostCookieCache.values()) {
-                    if (StringUtils.isNotBlank(cookieStr)) {
-                        Cookie cookie = Cookie.parse(httpUrl, cookieStr);
-                        if (null != cookie && cookie.expiresAt() > now()) {
+        //从host中获取对应的cookie.domain列表
+        String key = key(String.valueOf(hashCode()), httpUrl.host());
+        if (StringUtils.isNotBlank(tag)) {
+            key = key(tag, httpUrl.host());
+        }
+        Set<String> tmpCookies = new HashSet<>();
+        Set<String> domains = cacheService.smembers(key);
+        for (String domain : domains) {
+            Set<String> cacheCookieNames = cacheService.smembers(domain);
+            for (String cacheCookieName : cacheCookieNames) {
+                String dck = String.format(CACHE_SPEC_KEY, domain, cacheCookieName);
+                String cacheCookie = cacheService.get(dck, String.class, null);
+                if (StringUtils.isNotBlank(cacheCookie)) {
+                    Cookie cookie = Cookie.parse(httpUrl, cacheCookie);
+                    if (null != cookie) {
+                        if (cookie.expiresAt() > now()) {
                             list.add(cookie);
+                            tmpCookies.add(cookie.toString());
                         }
                     }
                 }
             }
-        } else {
-            hostCookieCache = new ConcurrentHashMap<>();
-            //第一次从Redis中获取
-            String key = key(String.valueOf(hashCode()), httpUrl.host());
-            if (StringUtils.isNotBlank(tag)) {
-                key = key(tag, httpUrl.host());
-            }
-
-            Map<String, String> cacheCookieMap = new HashMap<>();
-            if (StringUtils.isNotBlank(key)) {
-                String jsonString = cacheService.get(key, String.class, null);
-                if (StringUtils.isNotBlank(jsonString)) {
-                    Map<String, String> tmpCacheCookieMap = JSON.parseObject(jsonString, Map.class);
-                    if (MapUtils.isNotEmpty(tmpCacheCookieMap)) {
-                        cacheCookieMap.putAll(tmpCacheCookieMap);
-                    }
-                }
-            }
-
-            if (MapUtils.isNotEmpty(cacheCookieMap)) {
-                for (Map.Entry<String, String> entry : cacheCookieMap.entrySet()) {
-                    if (StringUtils.isNotBlank(entry.getValue())) {
-                        Cookie cookie = Cookie.parse(httpUrl, entry.getValue());
-                        if (null != cookie) {
-                            if (cookie.expiresAt() > now()) {
-                                hostCookieCache.put(cookie.name(), cookie.toString());
-                                list.add(cookie);
-                            }
-//                            else {
-//                                logger.error("remove key:{},value:{}", entry.getKey(), entry.getValue());
-//                                cacheCookieMap.remove(entry.getKey());
-//                                hostCookieCache.remove(cookie.name());
-//                            }
-                        }
-                    }
-                }
-
-                if (MapUtils.isNotEmpty(hostCookieCache)) {
-                    memoryCookies.put(httpUrl.host(), hostCookieCache);
-                }
-
-            }
+        }
+        if (CollectionUtils.isNotEmpty(tmpCookies)) {
+            logger.debug("loadForRequest.tmpCookies {}", JSON.toJSONString(tmpCookies));
         }
         return list;
     }
